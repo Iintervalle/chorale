@@ -261,7 +261,8 @@ function prochainesDates() {
 
   let garde = 0;
   while (out.length < CONFIG.nbDatesProposees && garde++ < 60) {
-    const iso = d.toISOString().slice(0, 10);
+    const p = n => String(n).padStart(2, '0');
+    const iso = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
     const [h, m] = CONFIG.heureDebut.split(':').map(Number);
     const debutSeance = new Date(d); debutSeance.setHours(h, m, 0, 0);
     if (!CONFIG.exclusions.includes(iso) && debutSeance > limite) {
