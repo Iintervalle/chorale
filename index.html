@@ -73,6 +73,14 @@
   .success-badge { width: 56px; height: 56px; border-radius: 50%; background: var(--violet); color: #fff; font-size: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; }
   #formStep.hidden { display: none; }
   .footer { border-top: 1.5px solid var(--brown); padding: 28px 40px; font-size: 12px; font-weight: 300; opacity: .6; text-align: center; }
+  .footer a { color: var(--brown); }
+
+  /* Bandeau de consentement (mesure d'audience / publicité Google) */
+  .trk-consent { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: calc(100% - 32px); max-width: 560px; background: var(--cream); color: var(--brown); border: 1.5px solid var(--brown); border-radius: 16px; padding: 14px 16px; z-index: 250; box-shadow: 0 10px 30px rgba(0,0,0,0.2); display: none; font-size: 13px; line-height: 1.5; }
+  .trk-consent.visible { display: block; }
+  .trk-consent-actions { display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end; }
+  .trk-btn { font-family: inherit; font-size: 13px; font-weight: 500; padding: 9px 18px; border-radius: 10px; border: 1.5px solid var(--brown); background: transparent; color: var(--brown); cursor: pointer; }
+  .trk-btn:hover { background: var(--brown); color: var(--cream); }
   @media (max-width: 560px) {
     .header { padding: 20px; }
     .main { padding: 36px 16px 64px; }
@@ -191,7 +199,173 @@
 
 </div>
 
-<div class="footer">L'Intervalle — Fabrique musicale · 112 rue du Chemin Vert, 75011 Paris</div>
+<div class="footer">L'Intervalle — Fabrique musicale · 112 rue du Chemin Vert, 75011 Paris · <a href="#" onclick="TRK.reopen(); return false;">Cookies</a></div>
+
+<!-- Consentement : mesure d'audience / publicité Google -->
+<div class="trk-consent" id="trk-consent" role="dialog" aria-live="polite" aria-label="Cookies et mesure d'audience">
+  <div>Nous utilisons Google (cookies) pour mesurer l'efficacité de nos annonces et améliorer ce site. L'inscription à la séance d'essai fonctionne de la même façon si vous refusez. Vous pouvez changer d'avis à tout moment via « Cookies » en bas de page.</div>
+  <div class="trk-consent-actions">
+    <button type="button" class="trk-btn" onclick="TRK.refuse()">Refuser</button>
+    <button type="button" class="trk-btn" onclick="TRK.accept()">Accepter</button>
+  </div>
+</div>
+
+<script>
+/* ─── SUIVI DES CONVERSIONS (GA4 → Google Ads) ────────────────────────────────
+   Même module que la page de présentation et l'appli studios (même identifiant GA4 que le site Wix :
+   G-97WVKYHSQP, même nom de clé de consentement ; la chorale étant sur son propre sous-domaine,
+   le bandeau y est demandé une fois).
+   • Événement `essai_chorale_reserve` : envoyé UNIQUEMENT quand Make a accepté l'inscription
+     (jamais au clic). value = valeur estimée d'un essai (CONFIG.ESSAI_VALUE, en euros TTC),
+     transaction_id = identifiant d'inscription généré par la page (cho_AAAAMMJJ_xxxxxxxx).
+   • Consentement (CNIL) : Google n'est chargé qu'après un « Accepter ». Aucune donnée personnelle
+     n'est envoyée à Google (ni nom, ni email, ni téléphone).
+   • Test : ouvrir la page avec ?debug_ga=1 → les événements apparaissent dans GA4 > Administration > DebugView. */
+const TRK = (function () {
+  const GA4_ID = 'G-97WVKYHSQP';
+  const CONSENT_KEY = 'intervalle-consent-mesure';   // 'granted' | 'denied'
+  let memConsent = null;
+  let loaded = false;
+  let pending = [];
+
+  const debug = (function () {
+    try {
+      if (new URLSearchParams(location.search).get('debug_ga') === '1') sessionStorage.setItem('trk_debug', '1');
+      return sessionStorage.getItem('trk_debug') === '1';
+    } catch (e) { return false; }
+  })();
+
+  function getConsent() {
+    try {
+      const v = localStorage.getItem(CONSENT_KEY);
+      if (v === 'granted' || v === 'denied') return v;
+    } catch (e) {}
+    return memConsent;
+  }
+  function setConsent(v) {
+    memConsent = v;
+    try { localStorage.setItem(CONSENT_KEY, v); } catch (e) {}
+  }
+  function consentSignals(v) {
+    return { ad_storage: v, analytics_storage: v, ad_user_data: v, ad_personalization: v };
+  }
+
+  function loadGtag() {
+    if (loaded) return;
+    loaded = true;
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag('consent', 'default', consentSignals('denied'));
+    window.gtag('consent', 'update', consentSignals('granted'));
+    const sc = document.createElement('script');
+    sc.async = true;
+    sc.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA4_ID;
+    document.head.appendChild(sc);
+    window.gtag('js', new Date());
+    window.gtag('config', GA4_ID, debug ? { debug_mode: true } : {});
+  }
+
+  // Retire les cookies Google Analytics / Ads posés par ce site (retrait du consentement).
+  function clearGoogleCookies() {
+    try {
+      const host = location.hostname;
+      const root = host.split('.').slice(-2).join('.');
+      document.cookie.split(';').forEach(function (c) {
+        const name = c.split('=')[0].trim();
+        if (!/^(_ga|_gid|_gcl|_gac)/.test(name)) return;
+        [host, '.' + host, '.' + root].forEach(function (d) {
+          document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=' + d;
+        });
+        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+      });
+    } catch (e) {}
+  }
+
+  // Évite de compter deux fois la même inscription (rechargement, retour arrière).
+  function firstTime(key) {
+    try {
+      const k = 'trk_' + key;
+      if (localStorage.getItem(k)) return false;
+      localStorage.setItem(k, '1');
+      return true;
+    } catch (e) { return true; }
+  }
+
+  function send(name, params) {
+    loadGtag();
+    window.gtag('event', name, params);
+  }
+
+  function conversion(name, opts) {
+    opts = opts || {};
+    const consent = getConsent();
+    if (consent === 'denied') return false;
+    if (opts.transactionId && !firstTime(name + '_' + opts.transactionId)) return false;
+    const params = Object.assign({ currency: opts.currency || 'EUR' }, opts.extra || {});
+    if (opts.transactionId) params.transaction_id = String(opts.transactionId);
+    if (typeof opts.value === 'number' && isFinite(opts.value)) params.value = Math.round(opts.value * 100) / 100;
+    if (consent === 'granted') send(name, params);
+    else pending.push([name, params]);   // pas encore de réponse au bandeau : on garde en attente
+    return true;
+  }
+
+  function showBanner(show) {
+    const el = document.getElementById('trk-consent');
+    if (el) el.classList.toggle('visible', !!show);
+  }
+
+  return {
+    init: function () {
+      const c = getConsent();
+      if (c === 'granted') loadGtag();
+      else if (c === null) showBanner(true);
+    },
+    accept: function () {
+      setConsent('granted');
+      showBanner(false);
+      loadGtag();
+      window.gtag('consent', 'update', consentSignals('granted'));
+      const q = pending; pending = [];
+      q.forEach(function (e) { send(e[0], e[1]); });
+    },
+    refuse: function () {
+      setConsent('denied');
+      showBanner(false);
+      pending = [];
+      if (window.gtag) window.gtag('consent', 'update', consentSignals('denied'));
+      clearGoogleCookies();
+    },
+    reopen: function () { showBanner(true); },
+
+    // Séance d'essai chorale réservée (acceptée par Make).
+    essaiChoraleReserve: function (inscriptionId, value, extra) {
+      if (!inscriptionId) return false;
+      return conversion('essai_chorale_reserve', { transactionId: inscriptionId, value: value, extra: extra });
+    },
+  };
+})();
+
+// Identifiant de clic Google Ads : dans l'URL d'arrivée, sinon dans le cookie posé par le site Wix
+// (cookie `gclid` sur .lintervalle-studios.com), sinon gardé pour la session.
+function readGclid() {
+  try {
+    const fromUrl = new URLSearchParams(location.search).get('gclid');
+    if (fromUrl) { try { sessionStorage.setItem('gclid', fromUrl); } catch (e) {} return fromUrl; }
+    const m = document.cookie.match(/(?:^|;\s*)gclid=([^;]+)/);
+    if (m) return decodeURIComponent(m[1]);
+    return sessionStorage.getItem('gclid') || '';
+  } catch (e) { return ''; }
+}
+readGclid();   // mémorise le gclid dès l'arrivée, avant que l'URL ne change
+
+// Identifiant d'inscription (sert de transaction_id pour ne compter chaque essai qu'une fois).
+function newInscriptionId() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const rnd = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+  return `cho_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${rnd}`;
+}
+</script>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
@@ -224,8 +398,9 @@ const CONFIG = {
   placesMax: 25,
   ageMin: 'La chorale est réservée aux adultes, à partir de 18 ans.',
 
-  // Conversion Google Ads (laisser vide pour désactiver)
-  ADS_CONVERSION_ID: '',     // ex. 'AW-123456789/AbCdEfGhIjK'
+  // Valeur estimée (en € TTC) d'une séance d'essai réservée, envoyée à GA4 / Google Ads.
+  // À ajuster : 45 €/mois × durée moyenne d'abonnement × part des essais qui s'abonnent.
+  ESSAI_VALUE: 15,
 };
 
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -350,8 +525,12 @@ btn.onclick = async () => {
   btn.disabled = true;
   btn.textContent = 'Envoi en cours…';
 
+  if (!state.inscriptionId) state.inscriptionId = newInscriptionId();
+
   const payload = {
     source: 'page-chorale',
+    inscription_id: state.inscriptionId,
+    gclid: readGclid(),
     prenom, nom, email, telephone, message,
     date_seance: state.date.iso,
     date_seance_label: state.date.label,
@@ -377,17 +556,16 @@ btn.onclick = async () => {
     s.classList.add('visible');
     s.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-    // Conversions
-    if (typeof gtag === 'function') {
-      gtag('event', 'generate_lead', { event_category: 'chorale', value: 1 });
-      if (CONFIG.ADS_CONVERSION_ID) gtag('event', 'conversion', { send_to: CONFIG.ADS_CONVERSION_ID });
-    }
+    // Conversion (GA4 → Google Ads) : seulement une fois l'inscription acceptée par Make.
+    TRK.essaiChoraleReserve(state.inscriptionId, CONFIG.ESSAI_VALUE, { seance_date: state.date.iso });
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'Réserver ma séance d’essai';
     showError("L'envoi n'a pas abouti. Réessayez dans un instant, ou écrivez-nous à contact@lintervalle-studios.com.");
   }
 };
+
+TRK.init();
 </script>
 </body>
 </html>
